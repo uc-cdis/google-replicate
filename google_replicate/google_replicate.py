@@ -112,7 +112,18 @@ def get_object_metadata(sess, bucket_name, blob_name):
     url = "https://www.googleapis.com/storage/v1/b/{}/o/{}".format(
         bucket_name, urllib.quote(blob_name, safe="")
     )
-    return sess.request(method="GET", url=url)
+    tries = 0
+    while tries < RETRIES_NUM:
+        try:
+            res = sess.request(method="GET", url=url)
+            if res.status_code == 200:
+                return res
+            else:
+                tries += 1
+        except Exception:
+            tries += 1
+
+    return None
 
 
 def delete_object(sess, bucket_name, blob_name):
@@ -432,7 +443,7 @@ def validate_uploaded_data(fi, sess, target_bucket, sig, crc32c, sorted_results)
         if meta_data is None:
             return False
 
-        if int(meta_data.json()["size"]) != fi["size"]:
+        if int(meta_data.json().get("size","0") != fi["size"]:
             logger.warn(
                 "Can not stream the object {}. Size does not match".format(fi.get("id"))
             )
