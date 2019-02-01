@@ -443,7 +443,7 @@ def validate_uploaded_data(fi, sess, target_bucket, sig, crc32c, sorted_results)
         if meta_data is None:
             return False
 
-        if int(meta_data.json().get("size","0") != fi["size"]:
+        if int(meta_data.json().get("size", "0")) != fi["size"]:
             logger.warn(
                 "Can not stream the object {}. Size does not match".format(fi.get("id"))
             )
