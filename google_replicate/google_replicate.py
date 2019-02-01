@@ -123,7 +123,7 @@ def get_object_metadata(sess, bucket_name, blob_name):
         except Exception:
             tries += 1
 
-    return None
+    return res
 
 
 def delete_object(sess, bucket_name, blob_name):
@@ -166,7 +166,7 @@ def upload_chunk_to_gs(sess, chunk_data, bucket, key, part_number):
         else:
             tries = tries + 1
 
-    return None
+    return res
 
 
 def upload_compose_object_gs(sess, bucket, key, object_parts, data_size):
@@ -333,7 +333,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
             key=object_path,
             part_number=chunk_info["part_number"],
         )
-        if res is None:
+        if res.status_code != 200:
             raise Exception(
                 "Can not upload chunk data of {} to {}".format(fi["id"], target_bucket)
             )
@@ -440,7 +440,7 @@ def validate_uploaded_data(fi, sess, target_bucket, sig, crc32c, sorted_results)
 
     if sig_check_pass:
         meta_data = get_object_metadata(sess, target_bucket, object_path)
-        if meta_data is None:
+        if meta_data.status_code != 200:
             return False
 
         if int(meta_data.json().get("size", "0")) != fi["size"]:
