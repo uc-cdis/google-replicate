@@ -1,0 +1,9 @@
+mock==1.0.1
+pytest-cov==2.5.1
+coverage==3.7.1
+boto3>=1.7.28
+#google-cloud==0.33.1
+google-cloud-storage==1.6.0
+-e git+https://git@github.com/uc-cdis/cdislogging.git@0.0.2#egg=cdislogging
+-e git+https://git@github.com/uc-cdis/indexclient.git@1.5.6#egg=indexclient
+-e git+https://git@github.com/uc-cdis/cdiserrors.git@0.1.0#egg=cdiserrors
