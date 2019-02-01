@@ -33,7 +33,7 @@ from indexd_utils import update_url
 
 logger = get_logger("GoogleReplication")
 
-RETRIES_NUM = 5
+RETRIES_NUM = 30
 
 
 def prepare_data(manifest_file, global_config):
@@ -316,7 +316,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
                     tries += 1
             except Exception as e:
                 logger.warn(e)
-                time.sleep(5)
+                time.sleep(10)
                 tries += 1
 
         if tries == RETRIES_NUM:
