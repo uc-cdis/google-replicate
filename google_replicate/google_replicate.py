@@ -315,7 +315,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
                     time.sleep(20)
                     tries += 1
             except Exception as e:
-                logger.warn(e)
+                logger.warn("Take a sleep and retry. Detail {}".format(e))
                 time.sleep(10)
                 tries += 1
 
@@ -327,8 +327,9 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
         md5 = hashlib.md5(chunk).digest()
 
         part_number = chunk_info["part_number"]
-        if chunk_info["start"] == 0 and chunk_info["end"] <= chunk_data_size:
-            part_number = None 
+        if chunk_info["start"] == 0 and chunk_info["end"] < chunk_data_size:
+            part_number = None
+    
         res = upload_chunk_to_gs(
             sess,
             chunk_data=chunk,
