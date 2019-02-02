@@ -200,13 +200,16 @@ def upload_compose_object_gs(sess, bucket_name, key, object_parts, data_size):
     }
     retries = 0
     while retries < RETRIES_NUM:
-        res = sess.request(
-            method="POST", url=url, data=json.dumps(payload), headers=headers
-        )
-        if res.status_code == 200:
+        try:
+            res = sess.request(
+                method="POST", url=url, data=json.dumps(payload), headers=headers
+            )
             return res
-        else:
-            retries += 1
+        except Exception as e:
+            logger.warn("Upload fail. Take a sleep and retry. Detail {}".format(e))
+            time.sleep(10)
+            retries +=1 
+
     return None
 
 
@@ -401,7 +404,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
 
     if len(sorted_results) > 1:
         finish_multipart_upload_gs(
-            sess=sess, bucket=target_bucket, key=object_path, chunk_sizes=chunk_sizes
+            sess=sess, bucket_name=target_bucket, key=object_path, chunk_sizes=chunk_sizes
         )
 
     sig_check_pass = validate_uploaded_data(
