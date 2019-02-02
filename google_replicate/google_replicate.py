@@ -330,7 +330,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
         md5 = hashlib.md5(chunk).digest()
 
         part_number = chunk_info["part_number"]
-        if chunk_info["start"] == 0 and chunk_info["end"] < chunk_data_size:
+        if chunk_info["start"] == 0 and chunk_info["end"] < chunk_data_size - 1:
             part_number = None
     
         res = upload_chunk_to_gs(
@@ -611,4 +611,3 @@ def run(thread_num, global_config, job_name, manifest_file, bucket=None):
 
     for result in results:
         json_log.update(result)
-
