@@ -136,23 +136,23 @@ def delete_object(sess, bucket_name, blob_name):
     sess.request(method="DELETE", url=url)
 
 
-def upload_chunk_to_gs(sess, chunk_data, bucket, key, part_number):
+def upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number):
     """
     upload to create compose object.
 
     Args:
         sess(session): google client session
         chunk_data: chunk data
-        bucket(str): bucket name
+        bucket_name(str): bucket name
         key(str): key
         part_number(int): part number
 
     Return:
         http.Response
     """
-    object_part_name = key + "-" + str(part_number)
+    object_part_name = key + "-" + str(part_number) if part_number else key
     url = "https://www.googleapis.com/upload/storage/v1/b/{}/o?uploadType=media&name={}".format(
-        bucket, object_part_name
+        bucket_name, object_part_name
     )
     headers = {
         "Content-Type": "application/octet-stream",
@@ -169,14 +169,14 @@ def upload_chunk_to_gs(sess, chunk_data, bucket, key, part_number):
     return res
 
 
-def upload_compose_object_gs(sess, bucket, key, object_parts, data_size):
+def upload_compose_object_gs(sess, bucket_name, key, object_parts, data_size):
     """
     create compose object from object components
     the object component name is in the format of key-part_number
 
     Args:
         sess(session): google client session
-        bucket(str): bucket name
+        bucket_name(str): bucket name
         key(str): key
         object_parts(list(int)): list of object part number
         data_size(int): total data size of all object components
@@ -185,7 +185,7 @@ def upload_compose_object_gs(sess, bucket, key, object_parts, data_size):
         http.Response
     """
     url = "https://www.googleapis.com/storage/v1/b/{}/o/{}/compose".format(
-        bucket, urllib.quote(key, safe="")
+        bucket_name, urllib.quote(key, safe="")
     )
     payload = {"destination": {"contentType": "application/octet-stream"}}
     L = []
@@ -210,13 +210,13 @@ def upload_compose_object_gs(sess, bucket, key, object_parts, data_size):
     return None
 
 
-def finish_multipart_upload_gs(sess, bucket, key, chunk_sizes):
+def finish_multipart_upload_gs(sess, bucket_name, key, chunk_sizes):
     """
     concaternate all object parts
 
     Args:
         sess(session): google client session
-        bucket(str): bucket name
+        bucket_name(str): bucket name
         key(str): key
         chuck_sizes(list(int)): list of chunk sizes
 
@@ -238,7 +238,7 @@ def finish_multipart_upload_gs(sess, bucket, key, chunk_sizes):
         L.append(chunk_info["key"])
         total_size += chunk_info["size"]
         num +=1
-    res = upload_compose_object_gs(sess, bucket, key, L, total_size)
+    res = upload_compose_object_gs(sess, bucket_name, key, L, total_size)
 
     if res is not None:
         while not chunk_queue.empty():
@@ -250,12 +250,12 @@ def finish_multipart_upload_gs(sess, bucket, key, chunk_sizes):
                 total_size += chunk_info["size"]
                 num +=1
             if len(L) > 1:
-                res = upload_compose_object_gs(sess, bucket, key, L, total_size)
+                res = upload_compose_object_gs(sess, bucket_name, key, L, total_size)
                 if res is None:
                     break
     for i in range(0, part_number):
         component = key + "-" + str(i + 1)
-        delete_object(sess, bucket, component)
+        delete_object(sess, bucket_name, component)
 
     return res
 
@@ -326,13 +326,17 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
 
         md5 = hashlib.md5(chunk).digest()
 
+        part_number = chunk_info["part_number"]
+        if chunk_info["start"] == 0 and chunk_info["end"] <= chunk_data_size:
+            part_number = None 
         res = upload_chunk_to_gs(
             sess,
             chunk_data=chunk,
-            bucket=target_bucket,
+            bucket_name=target_bucket,
             key=object_path,
-            part_number=chunk_info["part_number"],
+            part_number=part_number,
         )
+
         if res.status_code != 200:
             raise Exception(
                 "Can not upload chunk data of {} to {}".format(fi["id"], target_bucket)
@@ -394,9 +398,10 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
         total_bytes_received += chunk_size
         chunk_sizes.append(chunk_size)
 
-    finish_multipart_upload_gs(
-        sess=sess, bucket=target_bucket, key=object_path, chunk_sizes=chunk_sizes
-    )
+    if len(sorted_results) > 1:
+        finish_multipart_upload_gs(
+            sess=sess, bucket=target_bucket, key=object_path, chunk_sizes=chunk_sizes
+        )
 
     sig_check_pass = validate_uploaded_data(
         fi, sess, target_bucket, sig, crc32c, sorted_results
