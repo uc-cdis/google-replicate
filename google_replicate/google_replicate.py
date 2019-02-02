@@ -151,6 +151,11 @@ def upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number):
         http.Response
     """
     object_part_name = key + "-" + str(part_number) if part_number else key
+
+    res = get_object_metadata(sess, bucket_name, object_part_name)
+    if res.status_code == 200 and int(res.json().get("size", "0")) == len(chunk_data):
+        return res
+
     url = "https://www.googleapis.com/upload/storage/v1/b/{}/o?uploadType=media&name={}".format(
         bucket_name, object_part_name
     )
@@ -549,11 +554,15 @@ def exec_google_copy(jobinfo):
 
         logger.info("Start streaming the object {}".format(fi["id"]))
 
-        begin = timeit.default_timer()
+        try:
+            begin = timeit.default_timer()
 
-        stream_object_from_gdc_api(fi, target_bucket, jobinfo.global_config)
+            stream_object_from_gdc_api(fi, target_bucket, jobinfo.global_config)
 
-        end = timeit.default_timer()
+            end = timeit.default_timer()
+        except Exception as e:
+            #Don't break
+            logger.warn("Can not stream {}. Detail {}".format(fi["id"], e))
 
         logger.info("Throughput {}(MiB)/s".format(fi["size"]/(end-begin)/1000/1000))
 
