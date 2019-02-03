@@ -560,11 +560,11 @@ def exec_google_copy(jobinfo):
             stream_object_from_gdc_api(fi, target_bucket, jobinfo.global_config)
 
             end = timeit.default_timer()
+
+            logger.info("Throughput {}(MiB)/s".format(fi["size"]/(end-begin)/1000/1000))
         except Exception as e:
             #Don't break
             logger.warn("Can not stream {}. Detail {}".format(fi["id"], e))
-
-        logger.info("Throughput {}(MiB)/s".format(fi["size"]/(end-begin)/1000/1000))
 
     jobinfo.manager_ns.total_processed_files += len(files)
     logger.info(
