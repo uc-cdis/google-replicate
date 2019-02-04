@@ -10,6 +10,7 @@ import queue
 import urllib
 import base64
 import crcmod
+import requests
 
 import threading
 
@@ -136,6 +137,42 @@ def delete_object(sess, bucket_name, blob_name):
     sess.request(method="DELETE", url=url)
 
 
+def resumable_upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number):
+
+    object_part_name = key + "-" + str(part_number) if part_number else key
+
+    res = get_object_metadata(sess, bucket_name, object_part_name)
+    if res.status_code == 200 and int(res.json().get("size", "0")) == len(chunk_data):
+        return res
+    
+    url = "https://www.googleapis.com/upload/storage/v1/b/{}/o?uploadType=resumable&name={}".format(
+        bucket_name, object_part_name
+    )
+    headers = {
+        "Content-Length": '0',
+    }
+    tries = 0
+    while tries < RETRIES_NUM:
+        res = sess.request(method="POST", url=url, headers=headers)
+        if res.status_code == 200:
+            break
+        else:
+            tries = tries + 1
+    
+    if tries == RETRIES_NUM:
+        return res
+
+    tries = 0
+    while tries < RETRIES_NUM:
+        res = sess.request(method="PUT", url=res.headers['Location'], data=chunk_data, headers={"Content-Length": str(len(chunk_data))})
+        if res.status_code in {200, 201}:
+            return res
+        else:
+            tries += 1
+
+    return res
+
+
 def upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number):
     """
     upload to create compose object.
@@ -155,7 +192,7 @@ def upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number):
     res = get_object_metadata(sess, bucket_name, object_part_name)
     if res.status_code == 200 and int(res.json().get("size", "0")) == len(chunk_data):
         return res
-
+    
     url = "https://www.googleapis.com/upload/storage/v1/b/{}/o?uploadType=media&name={}".format(
         bucket_name, object_part_name
     )
@@ -338,7 +375,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
         if chunk_info["start"] == 0 and chunk_info["end"] < chunk_data_size - 1:
             part_number = None
     
-        res = upload_chunk_to_gs(
+        res = resumable_upload_chunk_to_gs(
             sess,
             chunk_data=chunk,
             bucket_name=target_bucket,
@@ -383,7 +420,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
     # prepare to compute local etag
     md5_digests = []
 
-    chunk_data_size = global_config.get("data_chunk_size", 1024 * 1024 * 128)
+    chunk_data_size = global_config.get("data_chunk_size", 1024 * 1024 * 256)
 
     tasks = []
     for part_number, data_range in enumerate(
