@@ -10,7 +10,6 @@ import queue
 import urllib
 import base64
 import crcmod
-import requests
 
 import threading
 
@@ -589,7 +588,7 @@ def exec_google_copy(jobinfo):
             )
             continue
 
-        logger.info("Start streaming the object {}".format(fi["id"]))
+        logger.info("Start streaming the object {}. Size {} (GB)".format(fi["id"], fi["size"]/1000/1000/1000))
 
         try:
             begin = timeit.default_timer()
@@ -598,7 +597,7 @@ def exec_google_copy(jobinfo):
 
             end = timeit.default_timer()
 
-            logger.info("Throughput {}(MiB)/s".format(fi["size"]/(end-begin)/1000/1000))
+            logger.info("Throughput {}(MB)/s".format(fi["size"]/(end-begin)/1000/1000))
         except Exception as e:
             #Don't break
             logger.warn("Can not stream {}. Detail {}".format(fi["id"], e))
