@@ -33,7 +33,7 @@ from indexd_utils import update_url
 
 logger = get_logger("GoogleReplication")
 
-RETRIES_NUM = 30
+RETRIES_NUM = 10
 
 
 def prepare_data(manifest_file, global_config):
@@ -163,13 +163,23 @@ def resumable_upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number
 
     tries = 0
     while tries < RETRIES_NUM:
-        res = sess.request(method="PUT", url=res.headers['Location'], data=chunk_data, headers={"Content-Length": str(len(chunk_data))})
-        if res.status_code in {200, 201}:
-            return res
-        else:
+        res2 = sess.request(method="PUT", url=res.headers['Location'], data=chunk_data, headers={"Content-Length": str(len(chunk_data))})
+        if res2.status_code not in {200, 201}:
             tries += 1
+            continue
 
-    return res
+        meta_data_res = get_object_metadata(sess, bucket_name, object_part_name)
+        chunk_crc32 = crcmod.predefined.Crc('crc-32c')
+        chunk_crc32.update(chunk_data)
+        
+        if meta_data_res.json().get("crc32c", "") != base64.b64encode(chunk_crc32.digest()):
+            tries += 1
+        elif int(meta_data_res.json().get("size", "0")) != len(chunk_data):
+            tries += 1
+        else:
+            return res2
+
+    return res2
 
 
 def upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number):
