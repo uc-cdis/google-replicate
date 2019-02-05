@@ -498,7 +498,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
     # prepare to compute local etag
     md5_digests = []
 
-    chunk_data_size = global_config.get("data_chunk_size", 1024 * 1024 * 10)
+    chunk_data_size = global_config.get("data_chunk_size", 1024 * 1024 * 256)
 
     tasks = []
     for part_number, data_range in enumerate(
