@@ -10,6 +10,7 @@ import queue
 import urllib
 import base64
 import crcmod
+import requests
 
 import threading
 
@@ -175,6 +176,7 @@ def resumable_upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number
         if meta_data_res.json().get("crc32c", "") != base64.b64encode(chunk_crc32.digest()):
             tries += 1
         elif int(meta_data_res.json().get("size", "0")) != len(chunk_data):
+            logger.warn("upload chunk fail. retries")
             tries += 1
         else:
             return res2
@@ -255,13 +257,80 @@ def upload_compose_object_gs(sess, bucket_name, key, object_parts, data_size):
             res = sess.request(
                 method="POST", url=url, data=json.dumps(payload), headers=headers
             )
-            return res
+            if res.status_code in {200, 201}:
+                meta_data = get_object_metadata(sess, bucket_name, key)
+                if int(meta_data.json().get("size", "0")) != data_size:
+                    logger.warn("upload compose fail")
+                    retries += 1
+                else:
+                    return res
+            else:
+                retries += 1
         except Exception as e:
             logger.warn("Upload fail. Take a sleep and retry. Detail {}".format(e))
             time.sleep(10)
             retries +=1 
 
     return None
+
+
+def finish_compose_upload_gs(sess, bucket_name, key, chunk_sizes):
+    """
+    concaternate all object parts
+
+    Args:
+        sess(session): google client session
+        bucket_name(str): bucket name
+        key(str): key
+        chuck_sizes(list(int)): list of chunk sizes
+
+    Return:
+        http.Response
+    """
+    def exec_compose_objects(objects, bucket_name, key):
+        L = []
+        total_size = 0
+        for obj in objects:
+            L.append(obj["key"])
+            total_size += obj['size']
+
+        tries = 0
+        while tries < RETRIES_NUM:
+            res = upload_compose_object_gs(sess, bucket_name, key, L, total_size)
+            if res.status_code not in {200, 201}:
+                tries += 1
+            else:
+                return {"key": key, "size": total_size}
+        for obj in objects:
+            delete_object(sess, bucket_name, obj["key"])
+
+        return None
+
+    def recursive_compose_objects(objects, bucket_name, key):
+        if len(objects) < 32:
+            return [exec_compose_objects(objects, bucket_name, key)]
+        else:
+            first = 0
+            results = []
+            while first < len(objects):
+                last = min(len(objects) - 1, first + 31)
+                new_key = objects[first]["key"] + "-1"
+                results.append(exec_compose_objects(objects[first: last + 1], bucket_name, new_key))
+                first = last + 1
+            recursive_compose_objects(results, bucket_name, key)
+
+    objects = []
+
+    for i in range(0, len(chunk_sizes)):
+        objects.append({"key": key + "-" + str(i + 1), "size": chunk_sizes[i]})
+
+    res = requests.Response()
+    if None in recursive_compose_objects(objects, bucket_name, key):
+        res.status_code = 404
+    else:
+        res.status_code = 200
+    
+    return res
 
 
 def finish_multipart_upload_gs(sess, bucket_name, key, chunk_sizes):
@@ -429,7 +498,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
     # prepare to compute local etag
     md5_digests = []
 
-    chunk_data_size = global_config.get("data_chunk_size", 1024 * 1024 * 256)
+    chunk_data_size = global_config.get("data_chunk_size", 1024 * 1024 * 10)
 
     tasks = []
     for part_number, data_range in enumerate(
@@ -454,7 +523,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
         chunk_sizes.append(chunk_size)
 
     if len(sorted_results) > 1:
-        finish_multipart_upload_gs(
+        finish_compose_upload_gs(
             sess=sess, bucket_name=target_bucket, key=object_path, chunk_sizes=chunk_sizes
         )
 
@@ -505,7 +574,7 @@ def validate_uploaded_data(fi, sess, target_bucket, sig, crc32c, sorted_results)
 
         if int(meta_data.json().get("size", "0")) != fi["size"]:
             logger.warn(
-                "Can not stream the object {}. Size does not match".format(fi.get("id"))
+                "Can not stream the object {}. {} vs {}. Size does not match".format(fi.get("id"), int(meta_data.json().get("size", "0")), fi["size"])
             )
             sig_check_pass = False
 
@@ -598,7 +667,7 @@ def exec_google_copy(jobinfo):
             )
             continue
 
-        logger.info("Start streaming the object {}. Size {} (GB)".format(fi["id"], fi["size"]/1000/1000/1000))
+        logger.info("Start streaming the object {}. Size {} (GB)".format(fi["id"], fi["size"]*1.0/1000/1000/1000))
 
         try:
             begin = timeit.default_timer()
