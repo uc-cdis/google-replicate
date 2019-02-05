@@ -144,7 +144,7 @@ def resumable_upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number
     res = get_object_metadata(sess, bucket_name, object_part_name)
     if res.status_code == 200 and int(res.json().get("size", "0")) == len(chunk_data):
         return res
-    
+
     url = "https://www.googleapis.com/upload/storage/v1/b/{}/o?uploadType=resumable&name={}".format(
         bucket_name, object_part_name
     )
@@ -158,7 +158,7 @@ def resumable_upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number
             break
         else:
             tries = tries + 1
-    
+
     if tries == RETRIES_NUM:
         return res
 
@@ -172,7 +172,7 @@ def resumable_upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number
         meta_data_res = get_object_metadata(sess, bucket_name, object_part_name)
         chunk_crc32 = crcmod.predefined.Crc('crc-32c')
         chunk_crc32.update(chunk_data)
-        
+
         if meta_data_res.json().get("crc32c", "") != base64.b64encode(chunk_crc32.digest()):
             tries += 1
         elif int(meta_data_res.json().get("size", "0")) != len(chunk_data):
@@ -203,7 +203,7 @@ def upload_chunk_to_gs(sess, chunk_data, bucket_name, key, part_number):
     res = get_object_metadata(sess, bucket_name, object_part_name)
     if res.status_code == 200 and int(res.json().get("size", "0")) == len(chunk_data):
         return res
-    
+
     url = "https://www.googleapis.com/upload/storage/v1/b/{}/o?uploadType=media&name={}".format(
         bucket_name, object_part_name
     )
@@ -269,7 +269,7 @@ def upload_compose_object_gs(sess, bucket_name, key, object_parts, data_size):
         except Exception as e:
             logger.warn("Upload fail. Take a sleep and retry. Detail {}".format(e))
             time.sleep(10)
-            retries +=1 
+            retries +=1
 
     return None
 
@@ -300,11 +300,11 @@ def finish_compose_upload_gs(sess, bucket_name, key, chunk_sizes):
             if res.status_code not in {200, 201}:
                 tries += 1
             else:
+                for obj in objects:
+                    delete_object(sess, bucket_name, obj["key"])
                 return {"key": key, "size": total_size}
-        for obj in objects:
-            delete_object(sess, bucket_name, obj["key"])
 
-        return None
+        return {}
 
     def recursive_compose_objects(objects, bucket_name, key):
         if len(objects) < 32:
@@ -317,7 +317,7 @@ def finish_compose_upload_gs(sess, bucket_name, key, chunk_sizes):
                 new_key = objects[first]["key"] + "-1"
                 results.append(exec_compose_objects(objects[first: last + 1], bucket_name, new_key))
                 first = last + 1
-            recursive_compose_objects(results, bucket_name, key)
+            return recursive_compose_objects(results, bucket_name, key)
 
     objects = []
 
@@ -325,60 +325,10 @@ def finish_compose_upload_gs(sess, bucket_name, key, chunk_sizes):
         objects.append({"key": key + "-" + str(i + 1), "size": chunk_sizes[i]})
 
     res = requests.Response()
-    if None in recursive_compose_objects(objects, bucket_name, key):
+    if {} in recursive_compose_objects(objects, bucket_name, key):
         res.status_code = 404
     else:
         res.status_code = 200
-    
-    return res
-
-
-def finish_multipart_upload_gs(sess, bucket_name, key, chunk_sizes):
-    """
-    concaternate all object parts
-
-    Args:
-        sess(session): google client session
-        bucket_name(str): bucket name
-        key(str): key
-        chuck_sizes(list(int)): list of chunk sizes
-
-    Return:
-        http.Response
-    """
-    part_number = len(chunk_sizes)
-    chunk_queue = queue.Queue()
-
-    for i in range(0, part_number):
-        chunk_queue.put({"key": key + "-" + str(i + 1), "size": chunk_sizes[i]})
-
-    num = 0
-    L = []
-    total_size = 0
-
-    while num < 32 and not chunk_queue.empty():
-        chunk_info = chunk_queue.get()
-        L.append(chunk_info["key"])
-        total_size += chunk_info["size"]
-        num +=1
-    res = upload_compose_object_gs(sess, bucket_name, key, L, total_size)
-
-    if res is not None:
-        while not chunk_queue.empty():
-            L = [key]
-            num = 1
-            while num < 32 and not chunk_queue.empty():
-                chunk_info = chunk_queue.get()
-                L.append(chunk_info["key"])
-                total_size += chunk_info["size"]
-                num +=1
-            if len(L) > 1:
-                res = upload_compose_object_gs(sess, bucket_name, key, L, total_size)
-                if res is None:
-                    break
-    for i in range(0, part_number):
-        component = key + "-" + str(i + 1)
-        delete_object(sess, bucket_name, component)
 
     return res
 
@@ -452,7 +402,7 @@ def stream_object_from_gdc_api(fi, target_bucket, global_config, endpoint=None):
         part_number = chunk_info["part_number"]
         if chunk_info["start"] == 0 and chunk_info["end"] < chunk_data_size - 1:
             part_number = None
-    
+
         res = resumable_upload_chunk_to_gs(
             sess,
             chunk_data=chunk,
