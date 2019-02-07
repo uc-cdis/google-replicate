@@ -6,7 +6,7 @@ import time
 import timeit
 import hashlib
 import urllib2
-import queue
+import random
 import urllib
 import base64
 import crcmod
@@ -55,6 +55,9 @@ def prepare_data(manifest_file, global_config):
             start=global_config.get("start"),
             end=global_config.get("end"),
         )
+
+    if global_config.get("file_shuffle", False):
+        random.shuffle(copying_files)
 
     chunk_size = global_config.get("chunk_size", 1)
     tasks = []
@@ -269,9 +272,9 @@ def upload_compose_object_gs(sess, bucket_name, key, object_parts, data_size):
         except Exception as e:
             logger.warn("Upload fail. Take a sleep and retry. Detail {}".format(e))
             time.sleep(10)
-            retries +=1
+            retries += 1
 
-    return None
+    return res
 
 
 def finish_compose_upload_gs(sess, bucket_name, key, chunk_sizes):
@@ -641,6 +644,23 @@ def exec_google_copy(jobinfo):
     return len(files)
 
 
+def _is_completed_task(sess, task):
+    
+    for fi in task:
+        try:
+            target_bucket = utils.get_google_bucket_name(fi, PROJECT_ACL)
+        except UserError as e:
+            logger.warn(e)
+            continue
+
+        blob_name = "{}/{}".format(fi["id"], fi["file_name"])
+        res = get_object_metadata(sess, target_bucket, blob_name)
+        if res.status_code != 200:
+            return False
+    
+    return True
+
+
 def run(thread_num, global_config, job_name, manifest_file, bucket=None):
     """
     start threads and log after they finish
@@ -652,8 +672,14 @@ def run(thread_num, global_config, job_name, manifest_file, bucket=None):
     manager_ns = manager.Namespace()
     manager_ns.total_processed_files = 0
 
+    client = storage.Client()
+    sess = AuthorizedSession(client._credentials)
+
     jobInfos = []
     for task in tasks:
+        if global_config.get("scan_copied_objects", False):
+            if _is_completed_task(sess, task):
+                continue
         job = JobInfo(
             global_config, task, len(tasks), job_name, {}, manager_ns, bucket
         )
